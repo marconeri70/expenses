@@ -1,5 +1,5 @@
 // ==== Storage helpers (LocalStorage) ====
-const KEY = 'expenses_v5'; // bump schema
+const KEY = 'expenses_v5'; // mantiene compatibilità con versione precedente
 
 function loadExpenses(){
   try { return JSON.parse(localStorage.getItem(KEY)) || []; }
@@ -51,6 +51,9 @@ const visibleTotalEl = document.getElementById('visibleTotal');
 const sumMonthEl = document.getElementById('sumMonth');
 const avgDayEl = document.getElementById('avgDay');
 const topCategoryEl = document.getElementById('topCategory');
+const countPaidEl = document.getElementById('countPaid');
+const countUnpaidEl = document.getElementById('countUnpaid');
+const countWithReceiptEl = document.getElementById('countWithReceipt');
 
 const exportCSVBtn = document.getElementById('exportCSV');
 const exportJSONBtn = document.getElementById('exportJSON');
@@ -62,9 +65,6 @@ const exportICSMonthBtn = document.getElementById('exportICSMonth');
 const exportICSUpcomingBtn = document.getElementById('exportICSUpcoming');
 
 const hiddenReceiptInput = document.getElementById('hiddenReceiptInput');
-const countPaidEl = document.getElementById('countPaid');
-const countUnpaidEl = document.getElementById('countUnpaid');
-const countWithReceiptEl = document.getElementById('countWithReceipt');
 
 // ==== PWA install prompt ====
 window.addEventListener('beforeinstallprompt', (e) => {
@@ -151,11 +151,10 @@ async function deleteReceipt(expenseId){
   return tx.complete;
 }
 
-// Helper: torna un Set con id che hanno ricevuta
+// Helper: Set con gli id che hanno ricevuta
 async function receiptsPresence(ids){
   await openDB();
   const set = new Set();
-  // query in sequenza (DB locale, costo ridotto)
   for(const id of ids){
     const r = await getReceipt(id);
     if(r && r.blob) set.add(id);
@@ -192,6 +191,13 @@ form.addEventListener('submit', async (e) => {
   paidDateEl.disabled = true;
   render();
 });
+
+// ==== Delete expense ====
+function removeExpense(id){
+  expenses = expenses.filter(e => e.id !== id);
+  saveExpenses(expenses);
+  render();
+}
 
 // ==== Azioni di riga ====
 async function markPaidToday(id){
@@ -402,7 +408,7 @@ exportICSUpcomingBtn?.addEventListener('click', () => {
 });
 
 // ==== Rendering ====
-// N.B. getFilteredSync non filtra per ricevuta (serve IDB). Il filtro ricevuta si applica in render().
+// getFilteredSync non filtra per ricevuta (richiede IDB). Il filtro ricevuta si applica in renderTable().
 function getFilteredSync(){
   const month = filterMonthEl.value; // yyyy-mm
   const cat = filterCategoryEl.value;
@@ -415,7 +421,6 @@ function getFilteredSync(){
     const cOk = !cat || e.category === cat;
     const sOk = !q || (e.note?.toLowerCase().includes(q));
     const pOk = paidOnly ? !!e.paid : (unpaidOnly ? !e.paid : true);
-    // filtro "con ricevuta" non qui (richiede IndexedDB)
     return mOk && cOk && sOk && pOk;
   }).sort((a,b) => b.date.localeCompare(a.date));
 }
@@ -429,8 +434,7 @@ async function renderTable(list){
     withReceipt = set;
     list = list.filter(e => set.has(e.id));
   } else {
-    // comunque usa presence per mostrare il badge
-    withReceipt = await receiptsPresence(ids);
+    withReceipt = await receiptsPresence(ids); // serve per il badge
   }
 
   tbody.innerHTML = '';
@@ -479,6 +483,7 @@ async function renderTable(list){
     tbody.appendChild(tr);
   }
 
+  // Bind azioni
   tbody.querySelectorAll('button[data-del]').forEach(btn => {
     btn.addEventListener('click', () => removeExpense(btn.dataset.del));
   });
@@ -530,11 +535,11 @@ async function renderSummary(list){
   const top = Object.entries(perCat).sort((a,b)=>b[1]-a[1])[0];
   topCategoryEl.textContent = top ? `${top[0]} (${fmtEUR(top[1])})` : '—';
 
-  // 👇 Nuovi contatori
+  // Contatori mese
   const paidCount = inMonth.filter(e => e.paid).length;
   const unpaidCount = inMonth.length - paidCount;
 
-  // Presenza ricevute (IndexedDB)
+  // Con ricevuta (IndexedDB)
   const withRecSet = await receiptsPresence(inMonth.map(e => e.id));
   const withReceiptCount = withRecSet.size;
 
@@ -542,7 +547,7 @@ async function renderSummary(list){
   countUnpaidEl.textContent = String(unpaidCount);
   countWithReceiptEl.textContent = String(withReceiptCount);
 
-  // Grafico multicolore (come prima)
+  // Grafico multicolore
   const labels = Object.keys(CATEGORY_COLORS);
   const data = labels.map(l => perCat[l] || 0);
   const colors = labels.map(l => CATEGORY_COLORS[l]);
@@ -577,5 +582,4 @@ async function render(){
 
 // ==== First paint ====
 render();
-
 
