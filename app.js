@@ -569,7 +569,7 @@ async function renderSummary(list){
 async function render(){
   const filtered = getFilteredSync();
   await renderTable(filtered);
-  renderSummary(filtered);
+  await renderSummary(filtered);
 }
 
 // ==== First paint ====
