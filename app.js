@@ -1,5 +1,5 @@
 // ==== Storage helpers (LocalStorage) ====
-const KEY = 'expenses_v4'; // bump schema per campi pagata/ricevuta
+const KEY = 'expenses_v5'; // bump schema
 
 function loadExpenses(){
   try { return JSON.parse(localStorage.getItem(KEY)) || []; }
@@ -13,7 +13,7 @@ function saveExpenses(list){
 let expenses = loadExpenses();
 let deferredPrompt = null;
 let chart;
-let currentReceiptExpenseId = null; // per file picker nascosto
+let currentReceiptExpenseId = null;
 
 // ==== Category colors ====
 const CATEGORY_COLORS = {
@@ -40,6 +40,9 @@ const receiptFileEl = document.getElementById('receiptFile');
 
 const filterMonthEl = document.getElementById('filterMonth');
 const filterCategoryEl = document.getElementById('filterCategory');
+const filterPaidOnlyEl = document.getElementById('filterPaidOnly');
+const filterUnpaidOnlyEl = document.getElementById('filterUnpaidOnly');
+const filterWithReceiptOnlyEl = document.getElementById('filterWithReceiptOnly');
 const clearFiltersBtn = document.getElementById('clearFilters');
 const searchEl = document.getElementById('search');
 
@@ -80,7 +83,6 @@ const toISODate = (d) => new Date(d).toISOString().slice(0,10);
 function todayISO(){ return toISODate(new Date()); }
 function monthKey(dISO){ return dISO.slice(0,7); } // yyyy-mm
 function pad(n){ return String(n).padStart(2,'0'); }
-
 function isoToICSDate(isoYmd){ return isoYmd.replaceAll('-',''); } // all-day
 
 function escapeHtml(s){
@@ -88,12 +90,11 @@ function escapeHtml(s){
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
   }[m]));
 }
-
 function uuid(){ return (crypto?.randomUUID && crypto.randomUUID()) || (Date.now()+'-'+Math.random()); }
 
 dateEl.value = todayISO();
 
-// ==== Pagata: abilita/disabilita data ====
+// Pagata: abilita/disabilita data
 paidEl?.addEventListener('change', () => {
   paidDateEl.disabled = !paidEl.checked;
   if(paidEl.checked && !paidDateEl.value){
@@ -147,6 +148,18 @@ async function deleteReceipt(expenseId){
   return tx.complete;
 }
 
+// Helper: torna un Set con id che hanno ricevuta
+async function receiptsPresence(ids){
+  await openDB();
+  const set = new Set();
+  // query in sequenza (DB locale, costo ridotto)
+  for(const id of ids){
+    const r = await getReceipt(id);
+    if(r && r.blob) set.add(id);
+  }
+  return set;
+}
+
 // ==== Add expense ====
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -158,8 +171,8 @@ form.addEventListener('submit', async (e) => {
     category: categoryEl.value,
     amount: Number(amountEl.value),
     note: noteEl.value.trim(),
-    dueDate: dueDateEl.value || null,   // YYYY-MM-DD or null
-    remindDays: remind,                  // integer >= 0
+    dueDate: dueDateEl.value || null,
+    remindDays: remind,
     paid: !!paidEl.checked,
     paidDate: paidEl.checked ? (paidDateEl.value || todayISO()) : null
   };
@@ -167,11 +180,8 @@ form.addEventListener('submit', async (e) => {
   expenses.push(item);
   saveExpenses(expenses);
 
-  // salva ricevuta, se presente
   const file = receiptFileEl.files?.[0];
-  if(file){
-    await setReceipt(item.id, file);
-  }
+  if(file){ await setReceipt(item.id, file); }
 
   form.reset();
   dateEl.value = todayISO();
@@ -208,7 +218,6 @@ async function viewReceipt(id){
   const r = await getReceipt(id);
   if(!r || !r.blob){ alert('Nessuna ricevuta allegata.'); return; }
   const url = URL.createObjectURL(r.blob);
-  // Apri in nuova scheda; su mobile potrai "Condividi/Scarica/Apri con…"
   window.open(url, '_blank', 'noopener');
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
@@ -219,13 +228,16 @@ async function removeReceipt(id){
   render();
 }
 
-// ==== Filters & Search ====
-[filterMonthEl, filterCategoryEl, searchEl].forEach(el => {
+// ==== Filtri & Search ====
+[filterMonthEl, filterCategoryEl, filterPaidOnlyEl, filterUnpaidOnlyEl, filterWithReceiptOnlyEl, searchEl].forEach(el => {
   el.addEventListener('input', render);
 });
 clearFiltersBtn.addEventListener('click', ()=>{
   filterMonthEl.value = '';
   filterCategoryEl.value = '';
+  filterPaidOnlyEl.checked = false;
+  filterUnpaidOnlyEl.checked = false;
+  filterWithReceiptOnlyEl.checked = false;
   searchEl.value = '';
   render();
 });
@@ -233,7 +245,7 @@ clearFiltersBtn.addEventListener('click', ()=>{
 // ==== Export / Import (CSV/JSON) ====
 exportCSVBtn.addEventListener('click', () => {
   const rows = [['Data','Categoria','Importo','Scadenza','Promemoria(giorni)','Pagata','Data pagamento','Note']];
-  getFiltered().forEach(e => rows.push([
+  getFilteredSync().forEach(e => rows.push([
     e.date, e.category, e.amount.toFixed(2),
     e.dueDate || '', String(e.remindDays ?? ''),
     e.paid ? 'Sì' : 'No', e.paidDate || '',
@@ -243,7 +255,7 @@ exportCSVBtn.addEventListener('click', () => {
   downloadFile(`spese_${Date.now()}.csv`, 'text/csv;charset=utf-8', csv);
 });
 exportJSONBtn.addEventListener('click', () => {
-  const data = JSON.stringify(expenses, null, 2); // Niente ricevute (blob)
+  const data = JSON.stringify(expenses, null, 2); // no ricevute
   downloadFile(`spese_backup_${Date.now()}.json`, 'application/json;charset=utf-8', data);
 });
 importJSONEl.addEventListener('change', async (e) => {
@@ -277,7 +289,7 @@ importJSONEl.addEventListener('change', async (e) => {
   }
 });
 
-// ==== Download helper ROBUSTO ====
+// ==== Download helper ====
 function downloadFile(name, type, content){
   try{
     const blob = new Blob([content], {type});
@@ -350,7 +362,6 @@ function escapeICS(s){
     .replace(/,/g,'\\,')
     .replace(/;/g,'\\;');
 }
-
 function buildCalendarEventFromExpense(e){
   if(!e.dueDate) return null;
   const summary = `Scadenza ${e.category}${e.amount? ' – '+fmtEUR(e.amount): ''}`;
@@ -375,7 +386,6 @@ exportICSMonthBtn?.addEventListener('click', () => {
   const ics = makeICS(evs);
   downloadFile(`scadenze_${month}.ics`, 'text/calendar;charset=utf-8', ics);
 });
-
 exportICSUpcomingBtn?.addEventListener('click', () => {
   const today = todayISO();
   const evs = expenses
@@ -389,25 +399,43 @@ exportICSUpcomingBtn?.addEventListener('click', () => {
 });
 
 // ==== Rendering ====
-function getFiltered(){
+// N.B. getFilteredSync non filtra per ricevuta (serve IDB). Il filtro ricevuta si applica in render().
+function getFilteredSync(){
   const month = filterMonthEl.value; // yyyy-mm
   const cat = filterCategoryEl.value;
   const q = searchEl.value.trim().toLowerCase();
+  const paidOnly = !!filterPaidOnlyEl.checked;
+  const unpaidOnly = !!filterUnpaidOnlyEl.checked;
 
   return expenses.filter(e => {
     const mOk = !month || monthKey(e.date) === month;
     const cOk = !cat || e.category === cat;
     const sOk = !q || (e.note?.toLowerCase().includes(q));
-    return mOk && cOk && sOk;
+    const pOk = paidOnly ? !!e.paid : (unpaidOnly ? !e.paid : true);
+    // filtro "con ricevuta" non qui (richiede IndexedDB)
+    return mOk && cOk && sOk && pOk;
   }).sort((a,b) => b.date.localeCompare(a.date));
 }
 
-function renderTable(list){
+async function renderTable(list){
+  // Applica filtro "Solo con ricevuta" usando IndexedDB
+  let ids = list.map(e => e.id);
+  let withReceipt = new Set();
+  if(filterWithReceiptOnlyEl.checked){
+    const set = await receiptsPresence(ids);
+    withReceipt = set;
+    list = list.filter(e => set.has(e.id));
+  } else {
+    // comunque usa presence per mostrare il badge
+    withReceipt = await receiptsPresence(ids);
+  }
+
   tbody.innerHTML = '';
   let visTotal = 0;
   for(const e of list){
     visTotal += e.amount;
     const color = CATEGORY_COLORS[e.category] || '#e2e8f0';
+    const hasRec = withReceipt.has(e.id);
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${e.date}</td>
@@ -432,7 +460,8 @@ function renderTable(list){
       <td>${Number(e.remindDays||0)} gg</td>
       <td>${e.paid ? `Sì (${e.paidDate})` : `<button class="secondary" data-paid="${e.id}">Paga oggi</button>`}</td>
       <td>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          ${hasRec ? `<span title="Ricevuta presente" style="font-size:1rem">📎</span>` : `<span title="Nessuna ricevuta" style="color:#94a3b8">—</span>`}
           <button class="secondary" data-recup="${e.id}">Carica</button>
           <button class="secondary" data-recview="${e.id}">Vedi</button>
           <button class="secondary" data-recdel="${e.id}">Rimuovi</button>
@@ -519,12 +548,13 @@ function renderSummary(list){
   });
 }
 
-function render(){
-  const list = getFiltered();
-  renderTable(list);
-  renderSummary(list);
+async function render(){
+  const filtered = getFilteredSync();
+  await renderTable(filtered);
+  renderSummary(filtered);
 }
 
 // ==== First paint ====
 render();
+
 
