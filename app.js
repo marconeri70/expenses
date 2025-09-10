@@ -508,20 +508,38 @@ function downloadSingleICS(id){
   downloadFile(`scadenza_${e.category}_${mm}.ics`, 'text/calendar;charset=utf-8', ics);
 }
 
-function renderSummary(list){
+async function renderSummary(list){
   const month = filterMonthEl.value || monthKey(todayISO());
+
+  // Spese registrate nel mese (in base a "Data registrazione")
   const inMonth = expenses.filter(e => monthKey(e.date) === month);
+
+  // Totale & media
   const total = inMonth.reduce((s,e)=>s+e.amount,0);
   sumMonthEl.textContent = fmtEUR(total);
 
   const days = new Date(Number(month.slice(0,4)), Number(month.slice(5,7)), 0).getDate();
   avgDayEl.textContent = fmtEUR(total / days || 0);
 
+  // Top categoria
   const perCat = {};
   for(const e of inMonth){ perCat[e.category] = (perCat[e.category]||0)+e.amount; }
   const top = Object.entries(perCat).sort((a,b)=>b[1]-a[1])[0];
   topCategoryEl.textContent = top ? `${top[0]} (${fmtEUR(top[1])})` : '—';
 
+  // 👇 Nuovi contatori
+  const paidCount = inMonth.filter(e => e.paid).length;
+  const unpaidCount = inMonth.length - paidCount;
+
+  // Presenza ricevute (IndexedDB)
+  const withRecSet = await receiptsPresence(inMonth.map(e => e.id));
+  const withReceiptCount = withRecSet.size;
+
+  countPaidEl.textContent = String(paidCount);
+  countUnpaidEl.textContent = String(unpaidCount);
+  countWithReceiptEl.textContent = String(withReceiptCount);
+
+  // Grafico multicolore (come prima)
   const labels = Object.keys(CATEGORY_COLORS);
   const data = labels.map(l => perCat[l] || 0);
   const colors = labels.map(l => CATEGORY_COLORS[l]);
