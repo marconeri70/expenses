@@ -56,6 +56,21 @@
           Promemoria (giorni prima)
           <input type="number" id="remindDays" min="0" step="1" value="2" />
         </label>
+
+        <label>
+          Pagata
+          <input type="checkbox" id="paid" />
+        </label>
+        <label>
+          Data pagamento
+          <input type="date" id="paidDate" disabled />
+        </label>
+
+        <label class="span-2">
+          Ricevuta (PDF/JPG/PNG)
+          <input type="file" id="receiptFile" accept="application/pdf,image/*" />
+        </label>
+
         <label class="span-2">
           Note (facoltative)
           <input type="text" id="note" placeholder="Es. Bolletta ACEA bimestre" />
@@ -101,10 +116,11 @@
 
   <section class="card">
     <h2>Movimenti</h2>
+
     <div class="table-actions">
       <div class="left">
         <button id="exportCSV" class="secondary">Esporta CSV</button>
-        <button id="exportJSON" class="secondary">Esporta JSON</button>
+        <button id="exportJSON" class="secondary">Esporta JSON (senza ricevute)</button>
         <label class="import">
           Importa JSON
           <input type="file" id="importJSON" accept="application/json" />
@@ -129,7 +145,9 @@
           <th>Categoria</th>
           <th class="num">Importo</th>
           <th>Scadenza</th>
-          <th>Promemoria</th>
+          <th>Prom.</th>
+          <th>Pagata</th>
+          <th>Ricevuta</th>
           <th>Note</th>
           <th></th>
         </tr>
@@ -139,14 +157,20 @@
         <tr>
           <td colspan="2"><strong>Totale visibile</strong></td>
           <td class="num" id="visibleTotal">€ 0,00</td>
-          <td colspan="4"></td>
+          <td colspan="6"></td>
         </tr>
       </tfoot>
     </table>
+
+    <!-- input nascosto per caricare ricevute su righe esistenti -->
+    <input type="file" id="hiddenReceiptInput" accept="application/pdf,image/*" style="display:none" />
   </section>
 
   <footer>
-    <small>💡 Dati salvati sul tuo dispositivo. Per i promemoria usa l’export <code>.ics</code> e importalo nel tuo calendario.</small>
+    <small>
+      💡 Dati e ricevute sono salvati solo sul dispositivo. Le <b>ricevute NON sono incluse</b> nel backup JSON.<br>
+      Usa il pulsante “Vedi” per scaricarle/esportarle quando serve.
+    </small>
   </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
