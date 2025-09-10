@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Spese Familiari</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="style.css" />
+  <meta name="theme-color" content="#0f766e">
+</head>
+<body>
+  <header>
+    <h1>Spese Familiari</h1>
+    <button id="installBtn" class="secondary" hidden>Installa</button>
+  </header>
+
+  <section class="card">
+    <h2>Nuova spesa</h2>
+    <form id="expenseForm">
+      <div class="grid">
+        <label>
+          Data
+          <input type="date" id="date" required />
+        </label>
+        <label>
+          Categoria
+          <select id="category" required>
+            <option value="Luce">Luce</option>
+            <option value="Gas">Gas</option>
+            <option value="Acqua">Acqua</option>
+            <option value="Internet">Internet</option>
+            <option value="Affitto">Affitto</option>
+            <option value="Spesa">Spesa</option>
+            <option value="Altro">Altro</option>
+          </select>
+        </label>
+        <label>
+          Importo (€)
+          <input type="number" id="amount" step="0.01" min="0" required />
+        </label>
+        <label class="span-2">
+          Note (facoltative)
+          <input type="text" id="note" placeholder="Es. Bolletta ACEA bimestre" />
+        </label>
+      </div>
+      <button type="submit">Aggiungi</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Filtri</h2>
+    <div class="grid">
+      <label>
+        Mese
+        <input type="month" id="filterMonth" />
+      </label>
+      <label>
+        Categoria
+        <select id="filterCategory">
+          <option value="">Tutte</option>
+          <option value="Luce">Luce</option>
+          <option value="Gas">Gas</option>
+          <option value="Acqua">Acqua</option>
+          <option value="Internet">Internet</option>
+          <option value="Affitto">Affitto</option>
+          <option value="Spesa">Spesa</option>
+          <option value="Altro">Altro</option>
+        </select>
+      </label>
+      <button id="clearFilters" class="secondary">Pulisci filtri</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Riepilogo</h2>
+    <div id="summary" class="summary">
+      <div><strong>Totale mese:</strong> <span id="sumMonth">€ 0,00</span></div>
+      <div><strong>Media giornaliera:</strong> <span id="avgDay">€ 0,00</span></div>
+      <div><strong>Top categoria:</strong> <span id="topCategory">—</span></div>
+    </div>
+    <canvas id="barChart" height="200" aria-label="Spese per categoria" role="img"></canvas>
+  </section>
+
+  <section class="card">
+    <h2>Movimenti</h2>
+    <div class="table-actions">
+      <div class="left">
+        <button id="exportCSV" class="secondary">Esporta CSV</button>
+        <button id="exportJSON" class="secondary">Esporta JSON</button>
+        <label class="import">
+          Importa JSON
+          <input type="file" id="importJSON" accept="application/json" />
+        </label>
+      </div>
+      <div class="right">
+        <input type="search" id="search" placeholder="Cerca nelle note…" />
+      </div>
+    </div>
+    <table id="table">
+      <thead>
+        <tr>
+          <th>Data</th>
+          <th>Categoria</th>
+          <th class="num">Importo</th>
+          <th>Note</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+      <tfoot>
+        <tr>
+          <td colspan="2"><strong>Totale visibile</strong></td>
+          <td class="num" id="visibleTotal">€ 0,00</td>
+          <td colspan="2"></td>
+        </tr>
+      </tfoot>
+    </table>
+  </section>
+
+  <footer>
+    <small>💡 Dati salvati sul tuo dispositivo. Consiglia export periodico.</small>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha256-e9cJtY2c+0eVt4m5j3l6mV8M4x3f3Lo8z0k0d9dR8hA=" crossorigin="anonymous"></script>
+  <script src="app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./service-worker.js');
+    }
+  </script>
+</body>
+</html>
