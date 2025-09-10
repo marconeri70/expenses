@@ -1,4 +1,4 @@
-const CACHE = 'spese-cache-v2';
+const CACHE = 'spese-cache-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -27,8 +27,8 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const { request } = e;
-  // Cache-first per asset statici
   e.respondWith(
     caches.match(request).then(resp => resp || fetch(request))
   );
 });
+
