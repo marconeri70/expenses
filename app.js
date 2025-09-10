@@ -1,5 +1,5 @@
 // ==== Storage helpers (LocalStorage) ====
-const KEY = 'expenses_v1';
+const KEY = 'expenses_v3'; // bump schema per nuova versione con colori
 
 function loadExpenses(){
   try { return JSON.parse(localStorage.getItem(KEY)) || []; }
@@ -14,12 +14,25 @@ let expenses = loadExpenses();
 let deferredPrompt = null;
 let chart;
 
+// ==== Category colors ====
+const CATEGORY_COLORS = {
+  "Luce": "#facc15",     // giallo
+  "Gas": "#f97316",      // arancio
+  "Acqua": "#3b82f6",    // blu
+  "Internet": "#a855f7", // viola
+  "Affitto": "#ef4444",  // rosso
+  "Spesa": "#22c55e",    // verde
+  "Altro": "#64748b"     // grigio
+};
+
 // ==== Elements ====
 const form = document.getElementById('expenseForm');
 const dateEl = document.getElementById('date');
 const categoryEl = document.getElementById('category');
 const amountEl = document.getElementById('amount');
 const noteEl = document.getElementById('note');
+const dueDateEl = document.getElementById('dueDate');
+const remindDaysEl = document.getElementById('remindDays');
 
 const filterMonthEl = document.getElementById('filterMonth');
 const filterCategoryEl = document.getElementById('filterCategory');
@@ -37,6 +50,9 @@ const exportJSONBtn = document.getElementById('exportJSON');
 const importJSONEl = document.getElementById('importJSON');
 
 const installBtn = document.getElementById('installBtn');
+
+const exportICSMonthBtn = document.getElementById('exportICSMonth');
+const exportICSUpcomingBtn = document.getElementById('exportICSUpcoming');
 
 // ==== PWA install prompt ====
 window.addEventListener('beforeinstallprompt', (e) => {
@@ -57,24 +73,42 @@ const fmtEUR = (n) => n.toLocaleString('it-IT', { style:'currency', currency:'EU
 const toISODate = (d) => new Date(d).toISOString().slice(0,10);
 function todayISO(){ return toISODate(new Date()); }
 function monthKey(dISO){ return dISO.slice(0,7); } // yyyy-mm
+function pad(n){ return String(n).padStart(2,'0'); }
 
-// Set default date = today
+function isoToICSDate(isoYmd){
+  // Evento "all-day": YYYYMMDD (VALUE=DATE)
+  return isoYmd.replaceAll('-','');
+}
+
+function escapeHtml(s){
+  return s.replace(/[&<>"']/g, m => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[m]));
+}
+
+function uuid(){ return (crypto?.randomUUID && crypto.randomUUID()) || (Date.now()+'-'+Math.random()); }
+
+// Data registrazione default = oggi
 dateEl.value = todayISO();
 
 // ==== Add expense ====
 form.addEventListener('submit', (e) => {
   e.preventDefault();
+  const remind = remindDaysEl.value === '' ? 0 : Math.max(0, Math.floor(Number(remindDaysEl.value)));
   const item = {
-    id: crypto.randomUUID(),
+    id: uuid(),
     date: dateEl.value,
     category: categoryEl.value,
     amount: Number(amountEl.value),
-    note: noteEl.value.trim()
+    note: noteEl.value.trim(),
+    dueDate: dueDateEl.value || null,   // YYYY-MM-DD or null
+    remindDays: remind                  // integer >= 0
   };
   expenses.push(item);
   saveExpenses(expenses);
   form.reset();
   dateEl.value = todayISO();
+  remindDaysEl.value = 2;
   render();
 });
 
@@ -96,16 +130,18 @@ clearFiltersBtn.addEventListener('click', ()=>{
   render();
 });
 
-// ==== Export / Import ====
+// ==== Export / Import (CSV/JSON) ====
 exportCSVBtn.addEventListener('click', () => {
-  const rows = [['Data','Categoria','Importo','Note']];
-  getFiltered().forEach(e => rows.push([e.date, e.category, e.amount.toFixed(2), e.note.replaceAll('"','""')]));
+  const rows = [['Data','Categoria','Importo','Scadenza','Promemoria(giorni)','Note']];
+  getFiltered().forEach(e => rows.push([
+    e.date, e.category, e.amount.toFixed(2), e.dueDate || '', String(e.remindDays ?? ''), (e.note||'').replaceAll('"','""')
+  ]));
   const csv = rows.map(r => r.map(v => `"${v}"`).join(',')).join('\n');
-  downloadFile(`spese_${Date.now()}.csv`, 'text/csv', csv);
+  downloadFile(`spese_${Date.now()}.csv`, 'text/csv;charset=utf-8', csv);
 });
 exportJSONBtn.addEventListener('click', () => {
   const data = JSON.stringify(expenses, null, 2);
-  downloadFile(`spese_backup_${Date.now()}.json`, 'application/json', data);
+  downloadFile(`spese_backup_${Date.now()}.json`, 'application/json;charset=utf-8', data);
 });
 importJSONEl.addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
@@ -114,10 +150,11 @@ importJSONEl.addEventListener('change', async (e) => {
   try{
     const parsed = JSON.parse(text);
     if(Array.isArray(parsed)){
-      // Merge by id (avoid duplicates)
       const map = new Map(expenses.map(x => [x.id, x]));
       for(const item of parsed){
         if(item?.id && item?.date && item?.category && typeof item?.amount === 'number'){
+          if(item.remindDays == null) item.remindDays = 0;
+          if(item.dueDate == null) item.dueDate = null;
           map.set(item.id, item);
         }
       }
@@ -135,14 +172,116 @@ importJSONEl.addEventListener('change', async (e) => {
   }
 });
 
+// ==== Download helper ROBUSTO ====
 function downloadFile(name, type, content){
-  const blob = new Blob([content], {type});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = name;
-  a.click();
-  URL.revokeObjectURL(a.href);
+  try{
+    const blob = new Blob([content], {type});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 500);
+  } catch (err){
+    console.error('Download fallback', err);
+    const encoded = encodeURIComponent(content);
+    window.open(`data:${type},${encoded}`, '_blank', 'noopener');
+  }
 }
+
+// ==== ICS (Calendar) export ====
+function makeICS(events){
+  const dtstamp = new Date();
+  const DTSTAMP = dtstamp.getUTCFullYear()
+    + pad(dtstamp.getUTCMonth()+1)
+    + pad(dtstamp.getUTCDate()) + 'T'
+    + pad(dtstamp.getUTCHours())
+    + pad(dtstamp.getUTCMinutes())
+    + pad(dtstamp.getUTCSeconds()) + 'Z';
+
+  const lines = [
+    'BEGIN:VCALENDAR',
+    'PRODID:-//Spese Familiari//IT',
+    'VERSION:2.0',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH'
+  ];
+
+  for(const ev of events){
+    const uid = ev.uid || (uuid()+'@spese-familiari');
+    const DTSTART = isoToICSDate(ev.date); // all-day
+    const SUMMARY = (ev.summary || '').replace(/\n/g,' ');
+    const DESC = (ev.description || '').replace(/\n/g,' ');
+    lines.push('BEGIN:VEVENT');
+    lines.push(`UID:${uid}`);
+    lines.push(`DTSTAMP:${DTSTAMP}`);
+    lines.push(`DTSTART;VALUE=DATE:${DTSTART}`);
+    lines.push(`SUMMARY:${escapeICS(SUMMARY)}`);
+    if(DESC) lines.push(`DESCRIPTION:${escapeICS(DESC)}`);
+    if(ev.category) lines.push(`CATEGORIES:${escapeICS(ev.category)}`);
+    const d = Number(ev.remindDays ?? 0);
+    if(d > 0){
+      lines.push('BEGIN:VALARM');
+      lines.push('ACTION:DISPLAY');
+      lines.push(`TRIGGER:-P${d}D`);
+      lines.push('DESCRIPTION:Promemoria bolletta');
+      lines.push('END:VALARM');
+    }
+    lines.push('END:VEVENT');
+  }
+
+  lines.push('END:VCALENDAR');
+  return lines.join('\r\n');
+}
+function escapeICS(s){
+  return String(s)
+    .replace(/\\/g,'\\\\')
+    .replace(/\n/g,'\\n')
+    .replace(/,/g,'\\,')
+    .replace(/;/g,'\\;');
+}
+
+function buildCalendarEventFromExpense(e){
+  if(!e.dueDate) return null;
+  const summary = `Scadenza ${e.category}${e.amount? ' – '+fmtEUR(e.amount): ''}`;
+  const description = (e.note ? e.note+' | ' : '') + `Registrata: ${e.date}`;
+  return {
+    uid: e.id+'@spese-familiari',
+    date: e.dueDate,
+    summary,
+    description,
+    category: e.category,
+    remindDays: Math.max(0, Number(e.remindDays||0))
+  };
+}
+
+exportICSMonthBtn?.addEventListener('click', () => {
+  const month = filterMonthEl.value || monthKey(todayISO());
+  const evs = expenses
+    .filter(e => e.dueDate && monthKey(e.dueDate) === month)
+    .map(buildCalendarEventFromExpense)
+    .filter(Boolean);
+  if(evs.length === 0){ alert('Nessuna scadenza nel mese selezionato.'); return; }
+  const ics = makeICS(evs);
+  downloadFile(`scadenze_${month}.ics`, 'text/calendar;charset=utf-8', ics);
+});
+
+exportICSUpcomingBtn?.addEventListener('click', () => {
+  const today = todayISO();
+  const evs = expenses
+    .filter(e => e.dueDate && e.dueDate >= today)
+    .sort((a,b)=> a.dueDate.localeCompare(b.dueDate))
+    .map(buildCalendarEventFromExpense)
+    .filter(Boolean);
+  if(evs.length === 0){ alert('Nessuna scadenza futura.'); return; }
+  const ics = makeICS(evs);
+  downloadFile(`scadenze_future.ics`, 'text/calendar;charset=utf-8', ics);
+});
 
 // ==== Rendering ====
 function getFiltered(){
@@ -163,14 +302,33 @@ function renderTable(list){
   let visTotal = 0;
   for(const e of list){
     visTotal += e.amount;
+    const color = CATEGORY_COLORS[e.category] || '#e2e8f0';
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${e.date}</td>
-      <td>${e.category}</td>
+      <td>
+        <span style="
+          background:${color};
+          color:#0b1220;
+          padding:2px 8px;
+          border-radius:999px;
+          font-size:0.8rem;
+          font-weight:600;
+          display:inline-flex;
+          align-items:center;
+          gap:6px;
+        ">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#0b1220;opacity:.5"></span>
+          ${e.category}
+        </span>
+      </td>
       <td class="num">${fmtEUR(e.amount)}</td>
+      <td>${e.dueDate || '—'}</td>
+      <td>${Number(e.remindDays||0)} gg</td>
       <td>${e.note ? escapeHtml(e.note) : ''}</td>
       <td class="num">
-        <button class="danger" data-del="${e.id}">Elimina</button>
+        ${e.dueDate ? `<button class="secondary" data-ics="${e.id}" title="Scarica .ics">.ics</button>` : `<span style="color:#94a3b8">—</span>`}
+        <button class="danger" data-del="${e.id}" title="Elimina">Elimina</button>
       </td>
     `;
     tbody.appendChild(tr);
@@ -178,11 +336,23 @@ function renderTable(list){
   tbody.querySelectorAll('button[data-del]').forEach(btn => {
     btn.addEventListener('click', () => removeExpense(btn.dataset.del));
   });
+  tbody.querySelectorAll('button[data-ics]').forEach(btn => {
+    btn.addEventListener('click', () => downloadSingleICS(btn.dataset.ics));
+  });
   visibleTotalEl.textContent = fmtEUR(visTotal);
 }
 
+function downloadSingleICS(id){
+  const e = expenses.find(x => x.id === id);
+  if(!e){ alert('Elemento non trovato.'); return; }
+  if(!e.dueDate){ alert('Aggiungi una data di scadenza prima di esportare il .ics.'); return; }
+  const ev = buildCalendarEventFromExpense(e);
+  const ics = makeICS([ev]);
+  const mm = e.dueDate.slice(0,7);
+  downloadFile(`scadenza_${e.category}_${mm}.ics`, 'text/calendar;charset=utf-8', ics);
+}
+
 function renderSummary(list){
-  // se è selezionato un mese, calcolo su quel mese; altrimenti mese corrente
   const month = filterMonthEl.value || monthKey(todayISO());
   const inMonth = expenses.filter(e => monthKey(e.date) === month);
   const total = inMonth.reduce((s,e)=>s+e.amount,0);
@@ -196,16 +366,24 @@ function renderSummary(list){
   const top = Object.entries(perCat).sort((a,b)=>b[1]-a[1])[0];
   topCategoryEl.textContent = top ? `${top[0]} (${fmtEUR(top[1])})` : '—';
 
-  // chart
-  const labels = ['Luce','Gas','Acqua','Internet','Affitto','Spesa','Altro'];
+  // chart multicolore
+  const labels = Object.keys(CATEGORY_COLORS);
   const data = labels.map(l => perCat[l] || 0);
+  const colors = labels.map(l => CATEGORY_COLORS[l]);
+
   const ctx = document.getElementById('barChart');
   if(chart){ chart.destroy(); }
   chart = new Chart(ctx, {
     type: 'bar',
     data: {
       labels,
-      datasets: [{ label: `Spese per categoria (${month})`, data }]
+      datasets: [{
+        label: `Spese per categoria (${month})`,
+        data,
+        backgroundColor: colors,
+        borderColor: colors,
+        borderWidth: 1
+      }]
     },
     options: {
       responsive: true,
@@ -221,11 +399,6 @@ function render(){
   renderSummary(list);
 }
 
-function escapeHtml(s){
-  return s.replace(/[&<>"']/g, m => ({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-  }[m]));
-}
-
 // ==== First paint ====
 render();
+
