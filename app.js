@@ -62,6 +62,9 @@ const exportICSMonthBtn = document.getElementById('exportICSMonth');
 const exportICSUpcomingBtn = document.getElementById('exportICSUpcoming');
 
 const hiddenReceiptInput = document.getElementById('hiddenReceiptInput');
+const countPaidEl = document.getElementById('countPaid');
+const countUnpaidEl = document.getElementById('countUnpaid');
+const countWithReceiptEl = document.getElementById('countWithReceipt');
 
 // ==== PWA install prompt ====
 window.addEventListener('beforeinstallprompt', (e) => {
