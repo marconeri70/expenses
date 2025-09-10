@@ -4,14 +4,24 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Spese Familiari</title>
+
+  <!-- Manifest PWA -->
   <link rel="manifest" href="manifest.webmanifest">
+
+  <!-- Stile -->
   <link rel="stylesheet" href="style.css" />
+
+  <!-- Favicon e icone -->
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" sizes="192x192" href="icons/icon-192.png">
+
   <meta name="theme-color" content="#0f766e">
 </head>
 <body>
-  <header>
-    <h1>Spese Familiari</h1>
-    <button id="installBtn" class="secondary" hidden>Installa</button>
+  <header style="display:flex;align-items:center;gap:10px;">
+    <img src="icons/icon-192.png" alt="Logo Spese" style="height:32px;width:32px;">
+    <h1 style="margin:0;">Spese Familiari</h1>
+    <button id="installBtn" class="secondary" hidden style="margin-left:auto;">Installa</button>
   </header>
 
   <section class="card">
@@ -19,7 +29,7 @@
     <form id="expenseForm">
       <div class="grid">
         <label>
-          Data
+          Data registrazione
           <input type="date" id="date" required />
         </label>
         <label>
@@ -37,6 +47,14 @@
         <label>
           Importo (€)
           <input type="number" id="amount" step="0.01" min="0" required />
+        </label>
+        <label>
+          Scadenza (bolletta)
+          <input type="date" id="dueDate" />
+        </label>
+        <label>
+          Promemoria (giorni prima)
+          <input type="number" id="remindDays" min="0" step="1" value="2" />
         </label>
         <label class="span-2">
           Note (facoltative)
@@ -96,12 +114,22 @@
         <input type="search" id="search" placeholder="Cerca nelle note…" />
       </div>
     </div>
+
+    <div class="table-actions" style="margin-top:-6px">
+      <div class="left">
+        <button id="exportICSMonth" class="secondary">Calendario: .ics del mese filtrato</button>
+        <button id="exportICSUpcoming" class="secondary">Calendario: .ics scadenze future</button>
+      </div>
+    </div>
+
     <table id="table">
       <thead>
         <tr>
           <th>Data</th>
           <th>Categoria</th>
           <th class="num">Importo</th>
+          <th>Scadenza</th>
+          <th>Promemoria</th>
           <th>Note</th>
           <th></th>
         </tr>
@@ -111,17 +139,17 @@
         <tr>
           <td colspan="2"><strong>Totale visibile</strong></td>
           <td class="num" id="visibleTotal">€ 0,00</td>
-          <td colspan="2"></td>
+          <td colspan="4"></td>
         </tr>
       </tfoot>
     </table>
   </section>
 
   <footer>
-    <small>💡 Dati salvati sul tuo dispositivo. Consiglia export periodico.</small>
+    <small>💡 Dati salvati sul tuo dispositivo. Per i promemoria usa l’export <code>.ics</code> e importalo nel tuo calendario.</small>
   </footer>
 
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha256-e9cJtY2c+0eVt4m5j3l6mV8M4x3f3Lo8z0k0d9dR8hA=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="app.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
@@ -130,3 +158,4 @@
   </script>
 </body>
 </html>
+
