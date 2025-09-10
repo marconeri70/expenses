@@ -1,5 +1,5 @@
 // ==== Storage helpers (LocalStorage) ====
-const KEY = 'expenses_v3'; // bump schema per nuova versione con colori
+const KEY = 'expenses_v4'; // bump schema per campi pagata/ricevuta
 
 function loadExpenses(){
   try { return JSON.parse(localStorage.getItem(KEY)) || []; }
@@ -13,6 +13,7 @@ function saveExpenses(list){
 let expenses = loadExpenses();
 let deferredPrompt = null;
 let chart;
+let currentReceiptExpenseId = null; // per file picker nascosto
 
 // ==== Category colors ====
 const CATEGORY_COLORS = {
@@ -33,6 +34,9 @@ const amountEl = document.getElementById('amount');
 const noteEl = document.getElementById('note');
 const dueDateEl = document.getElementById('dueDate');
 const remindDaysEl = document.getElementById('remindDays');
+const paidEl = document.getElementById('paid');
+const paidDateEl = document.getElementById('paidDate');
+const receiptFileEl = document.getElementById('receiptFile');
 
 const filterMonthEl = document.getElementById('filterMonth');
 const filterCategoryEl = document.getElementById('filterCategory');
@@ -54,13 +58,15 @@ const installBtn = document.getElementById('installBtn');
 const exportICSMonthBtn = document.getElementById('exportICSMonth');
 const exportICSUpcomingBtn = document.getElementById('exportICSUpcoming');
 
+const hiddenReceiptInput = document.getElementById('hiddenReceiptInput');
+
 // ==== PWA install prompt ====
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   deferredPrompt = e;
   installBtn.hidden = false;
 });
-installBtn.addEventListener('click', async () => {
+installBtn?.addEventListener('click', async () => {
   if(!deferredPrompt) return;
   deferredPrompt.prompt();
   await deferredPrompt.userChoice;
@@ -75,10 +81,7 @@ function todayISO(){ return toISODate(new Date()); }
 function monthKey(dISO){ return dISO.slice(0,7); } // yyyy-mm
 function pad(n){ return String(n).padStart(2,'0'); }
 
-function isoToICSDate(isoYmd){
-  // Evento "all-day": YYYYMMDD (VALUE=DATE)
-  return isoYmd.replaceAll('-','');
-}
+function isoToICSDate(isoYmd){ return isoYmd.replaceAll('-',''); } // all-day
 
 function escapeHtml(s){
   return s.replace(/[&<>"']/g, m => ({
@@ -88,13 +91,67 @@ function escapeHtml(s){
 
 function uuid(){ return (crypto?.randomUUID && crypto.randomUUID()) || (Date.now()+'-'+Math.random()); }
 
-// Data registrazione default = oggi
 dateEl.value = todayISO();
 
+// ==== Pagata: abilita/disabilita data ====
+paidEl?.addEventListener('change', () => {
+  paidDateEl.disabled = !paidEl.checked;
+  if(paidEl.checked && !paidDateEl.value){
+    paidDateEl.value = todayISO();
+  }
+});
+
+// ==== IndexedDB per RICEVUTE (blob) ====
+let db;
+function openDB(){
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('speseDB', 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if(!db.objectStoreNames.contains('receipts')){
+        db.createObjectStore('receipts', { keyPath: 'expenseId' });
+      }
+    };
+    req.onsuccess = () => { db = req.result; resolve(db); };
+    req.onerror = () => reject(req.error);
+  });
+}
+async function setReceipt(expenseId, file){
+  await openDB();
+  const tx = db.transaction('receipts', 'readwrite');
+  const store = tx.objectStore('receipts');
+  const data = file ? {
+    expenseId,
+    name: file.name,
+    type: file.type || 'application/octet-stream',
+    size: file.size,
+    blob: file
+  } : { expenseId, name: null, type: null, size: 0, blob: null };
+  store.put(data);
+  return tx.complete;
+}
+async function getReceipt(expenseId){
+  await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('receipts', 'readonly');
+    const store = tx.objectStore('receipts');
+    const req = store.get(expenseId);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function deleteReceipt(expenseId){
+  await openDB();
+  const tx = db.transaction('receipts', 'readwrite');
+  tx.objectStore('receipts').delete(expenseId);
+  return tx.complete;
+}
+
 // ==== Add expense ====
-form.addEventListener('submit', (e) => {
+form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const remind = remindDaysEl.value === '' ? 0 : Math.max(0, Math.floor(Number(remindDaysEl.value)));
+
   const item = {
     id: uuid(),
     date: dateEl.value,
@@ -102,20 +159,63 @@ form.addEventListener('submit', (e) => {
     amount: Number(amountEl.value),
     note: noteEl.value.trim(),
     dueDate: dueDateEl.value || null,   // YYYY-MM-DD or null
-    remindDays: remind                  // integer >= 0
+    remindDays: remind,                  // integer >= 0
+    paid: !!paidEl.checked,
+    paidDate: paidEl.checked ? (paidDateEl.value || todayISO()) : null
   };
+
   expenses.push(item);
   saveExpenses(expenses);
+
+  // salva ricevuta, se presente
+  const file = receiptFileEl.files?.[0];
+  if(file){
+    await setReceipt(item.id, file);
+  }
+
   form.reset();
   dateEl.value = todayISO();
   remindDaysEl.value = 2;
+  paidDateEl.disabled = true;
   render();
 });
 
-// ==== Delete expense ====
-function removeExpense(id){
-  expenses = expenses.filter(e => e.id !== id);
+// ==== Azioni di riga ====
+async function markPaidToday(id){
+  const ix = expenses.findIndex(x => x.id === id);
+  if(ix < 0) return;
+  expenses[ix].paid = true;
+  expenses[ix].paidDate = todayISO();
   saveExpenses(expenses);
+  render();
+}
+
+async function attachReceiptViaPickerFor(id){
+  currentReceiptExpenseId = id;
+  hiddenReceiptInput.value = '';
+  hiddenReceiptInput.click();
+}
+hiddenReceiptInput.addEventListener('change', async () => {
+  const f = hiddenReceiptInput.files?.[0];
+  if(!f || !currentReceiptExpenseId) return;
+  await setReceipt(currentReceiptExpenseId, f);
+  currentReceiptExpenseId = null;
+  alert('Ricevuta salvata ✅');
+  render();
+});
+
+async function viewReceipt(id){
+  const r = await getReceipt(id);
+  if(!r || !r.blob){ alert('Nessuna ricevuta allegata.'); return; }
+  const url = URL.createObjectURL(r.blob);
+  // Apri in nuova scheda; su mobile potrai "Condividi/Scarica/Apri con…"
+  window.open(url, '_blank', 'noopener');
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+async function removeReceipt(id){
+  await deleteReceipt(id);
+  alert('Ricevuta rimossa.');
   render();
 }
 
@@ -132,15 +232,18 @@ clearFiltersBtn.addEventListener('click', ()=>{
 
 // ==== Export / Import (CSV/JSON) ====
 exportCSVBtn.addEventListener('click', () => {
-  const rows = [['Data','Categoria','Importo','Scadenza','Promemoria(giorni)','Note']];
+  const rows = [['Data','Categoria','Importo','Scadenza','Promemoria(giorni)','Pagata','Data pagamento','Note']];
   getFiltered().forEach(e => rows.push([
-    e.date, e.category, e.amount.toFixed(2), e.dueDate || '', String(e.remindDays ?? ''), (e.note||'').replaceAll('"','""')
+    e.date, e.category, e.amount.toFixed(2),
+    e.dueDate || '', String(e.remindDays ?? ''),
+    e.paid ? 'Sì' : 'No', e.paidDate || '',
+    (e.note||'').replaceAll('"','""')
   ]));
   const csv = rows.map(r => r.map(v => `"${v}"`).join(',')).join('\n');
   downloadFile(`spese_${Date.now()}.csv`, 'text/csv;charset=utf-8', csv);
 });
 exportJSONBtn.addEventListener('click', () => {
-  const data = JSON.stringify(expenses, null, 2);
+  const data = JSON.stringify(expenses, null, 2); // Niente ricevute (blob)
   downloadFile(`spese_backup_${Date.now()}.json`, 'application/json;charset=utf-8', data);
 });
 importJSONEl.addEventListener('change', async (e) => {
@@ -155,13 +258,15 @@ importJSONEl.addEventListener('change', async (e) => {
         if(item?.id && item?.date && item?.category && typeof item?.amount === 'number'){
           if(item.remindDays == null) item.remindDays = 0;
           if(item.dueDate == null) item.dueDate = null;
+          if(item.paid == null) item.paid = false;
+          if(item.paid && !item.paidDate) item.paidDate = todayISO();
           map.set(item.id, item);
         }
       }
       expenses = Array.from(map.values());
       saveExpenses(expenses);
       render();
-      alert('Import completato ✅');
+      alert('Import completato ✅ (le ricevute non sono incluse nel JSON)');
     } else {
       alert('File JSON non valido.');
     }
@@ -325,6 +430,14 @@ function renderTable(list){
       <td class="num">${fmtEUR(e.amount)}</td>
       <td>${e.dueDate || '—'}</td>
       <td>${Number(e.remindDays||0)} gg</td>
+      <td>${e.paid ? `Sì (${e.paidDate})` : `<button class="secondary" data-paid="${e.id}">Paga oggi</button>`}</td>
+      <td>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="secondary" data-recup="${e.id}">Carica</button>
+          <button class="secondary" data-recview="${e.id}">Vedi</button>
+          <button class="secondary" data-recdel="${e.id}">Rimuovi</button>
+        </div>
+      </td>
       <td>${e.note ? escapeHtml(e.note) : ''}</td>
       <td class="num">
         ${e.dueDate ? `<button class="secondary" data-ics="${e.id}" title="Scarica .ics">.ics</button>` : `<span style="color:#94a3b8">—</span>`}
@@ -333,12 +446,26 @@ function renderTable(list){
     `;
     tbody.appendChild(tr);
   }
+
   tbody.querySelectorAll('button[data-del]').forEach(btn => {
     btn.addEventListener('click', () => removeExpense(btn.dataset.del));
   });
   tbody.querySelectorAll('button[data-ics]').forEach(btn => {
     btn.addEventListener('click', () => downloadSingleICS(btn.dataset.ics));
   });
+  tbody.querySelectorAll('button[data-paid]').forEach(btn => {
+    btn.addEventListener('click', () => markPaidToday(btn.dataset.paid));
+  });
+  tbody.querySelectorAll('button[data-recup]').forEach(btn => {
+    btn.addEventListener('click', () => attachReceiptViaPickerFor(btn.dataset.recup));
+  });
+  tbody.querySelectorAll('button[data-recview]').forEach(btn => {
+    btn.addEventListener('click', () => viewReceipt(btn.dataset.recview));
+  });
+  tbody.querySelectorAll('button[data-recdel]').forEach(btn => {
+    btn.addEventListener('click', () => removeReceipt(btn.dataset.recdel));
+  });
+
   visibleTotalEl.textContent = fmtEUR(visTotal);
 }
 
@@ -366,7 +493,6 @@ function renderSummary(list){
   const top = Object.entries(perCat).sort((a,b)=>b[1]-a[1])[0];
   topCategoryEl.textContent = top ? `${top[0]} (${fmtEUR(top[1])})` : '—';
 
-  // chart multicolore
   const labels = Object.keys(CATEGORY_COLORS);
   const data = labels.map(l => perCat[l] || 0);
   const colors = labels.map(l => CATEGORY_COLORS[l]);
