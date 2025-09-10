@@ -1,4 +1,4 @@
-const CACHE = 'spese-cache-v3';
+const CACHE = 'spese-cache-v4';
 const ASSETS = [
   './',
   './index.html',
@@ -10,9 +10,7 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(
-    caches.open(CACHE).then(cache => cache.addAll(ASSETS))
-  );
+  e.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)));
   self.skipWaiting();
 });
 
@@ -26,9 +24,9 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  const { request } = e;
   e.respondWith(
-    caches.match(request).then(resp => resp || fetch(request))
+    caches.match(e.request).then(resp => resp || fetch(e.request))
   );
 });
+
 
